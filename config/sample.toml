@@ -1,0 +1,43 @@
+# Sample configuration for sane-rss
+
+# Polling interval in seconds (default: 300 seconds = 5 minutes)
+polling_interval_seconds = 300
+server_host = "127.0.0.1"
+server_port = 8080
+
+[llm]
+api_key = "YOUR_ANTHROPIC_API_KEY"
+model = "claude-3-5-sonnet-20241022"
+thinking_enabled = false
+prompt = """
+You are an RSS feed filter. Analyze the following RSS post and determine if it matches any of the provided topics.
+
+Post title: {title}
+Post description: {description}
+
+Accept topics: {accept_topics}
+Reject topics: {reject_topics}
+
+Return a JSON response with two boolean fields:
+- "accept": true if the post matches any accept topics
+- "reject": true if the post matches any reject topics
+
+If both fields are true, the post will be accepted.
+"""
+
+[global_filters]
+accept = ["technology", "programming", "rust", "web development"]
+reject = ["advertising", "sponsored content", "clickbait"]
+
+
+[feeds.hackernews]
+url = "https://news.ycombinator.com/rss"
+[feeds.hackernews.filters]
+accept = ["startup", "open source"]
+reject = ["crypto", "blockchain"]
+
+[feeds.techcrunch]
+url = "https://techcrunch.com/feed/"
+[feeds.techcrunch.filters]
+accept = ["AI", "machine learning"]
+reject = ["fundraising"]
