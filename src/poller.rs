@@ -4,6 +4,7 @@ use crate::{
     llm::LlmFilter,
     storage::FeedStorage,
 };
+use futures::stream::{self, StreamExt};
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::time;
 use tracing::info;
@@ -81,19 +82,31 @@ impl FeedPoller {
     pub async fn initial_fetch(&self) {
         info!("Performing initial feed retrieval");
 
-        for (feed_name, feed_config) in &self.config.feeds {
-            if let Some(channel) = self.fetcher.fetch_feed(feed_name, feed_config).await {
-                let items = channel.into_items();
-                let mut guids = HashSet::new();
+        let feeds: Vec<_> = self.config.feeds.iter().collect();
 
-                for item in &items {
-                    guids.insert(item_to_guid(item));
+        let fetch_tasks = feeds.into_iter().map(|(feed_name, feed_config)| {
+            let fetcher = &self.fetcher;
+            let storage = &self.storage;
+
+            async move {
+                if let Some(channel) = fetcher.fetch_feed(feed_name, feed_config).await {
+                    let items = channel.into_items();
+                    let mut guids = HashSet::new();
+
+                    for item in &items {
+                        guids.insert(item_to_guid(item));
+                    }
+
+                    storage
+                        .store_initial_items(feed_name.clone(), items, guids)
+                        .await;
                 }
-
-                self.storage
-                    .store_initial_items(feed_name.clone(), items, guids)
-                    .await;
             }
-        }
+        });
+
+        stream::iter(fetch_tasks)
+            .buffer_unordered(5)
+            .collect::<Vec<_>>()
+            .await;
     }
 }
