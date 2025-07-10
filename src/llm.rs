@@ -33,6 +33,7 @@ impl LlmFilter {
     ) -> bool {
         let title = item.title().unwrap_or("No title");
         let description = item.description().unwrap_or("No description");
+        let link = item.link().unwrap_or("");
 
         let mut accept_topics = Vec::new();
         let mut reject_topics = Vec::new();
@@ -65,6 +66,7 @@ impl LlmFilter {
             .prompt
             .replace("{title}", title)
             .replace("{description}", description)
+            .replace("{link}", link)
             .replace("{accept_topics}", &accept_topics.join(", "))
             .replace("{reject_topics}", &reject_topics.join(", "));
 

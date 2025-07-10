@@ -14,6 +14,9 @@ You are an RSS feed filter. Analyze the following RSS post and determine if it m
 
 Post title: {title}
 Post description: {description}
+Post URL: {link}
+
+If the URL is provided and not empty, please fetch and read the content at that URL to better understand the post's content and make a more informed filtering decision.
 
 Accept topics: {accept_topics}
 Reject topics: {reject_topics}
