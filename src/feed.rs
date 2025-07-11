@@ -1,7 +1,7 @@
 use crate::config::FeedConfig;
 use rss::{Channel, Item};
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, warn};
 
 pub struct FeedFetcher {
     client: reqwest::Client,
@@ -18,13 +18,13 @@ impl FeedFetcher {
     }
 
     pub async fn fetch_feed(&self, feed_name: &str, config: &FeedConfig) -> Option<Channel> {
-        info!("Fetching feed: {} from {}", feed_name, config.url);
+        debug!("Fetching feed: {} from {}", feed_name, config.url);
 
         match self.client.get(&config.url).send().await {
             Ok(response) => match response.text().await {
                 Ok(content) => match Channel::read_from(content.as_bytes()) {
                     Ok(channel) => {
-                        info!(
+                        debug!(
                             "Successfully fetched feed: {} with {} items",
                             feed_name,
                             channel.items().len()

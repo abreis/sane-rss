@@ -7,7 +7,7 @@ use crate::{
 use futures::stream::{self, StreamExt};
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::time;
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct FeedPoller {
     config: Arc<Config>,
@@ -35,12 +35,12 @@ impl FeedPoller {
             self.config.polling_interval_seconds()
         );
 
-        // Skip the first tick to avoid immediate polling
+        // The first tick completes immediately, skip it to avoid immediate polling.
         interval.tick().await;
 
         loop {
             interval.tick().await;
-            info!("Starting feed polling cycle");
+            debug!("Starting feed polling cycle");
             self.poll_all_feeds().await;
         }
     }
@@ -70,6 +70,7 @@ impl FeedPoller {
 
                         if should_accept {
                             self.storage.add_filtered_item(feed_name, item, guid).await;
+                            info!("Added filtered item to feed {}", feed_name);
                         } else {
                             info!("Item rejected by filter");
                         }
@@ -79,7 +80,7 @@ impl FeedPoller {
         }
     }
 
-    pub async fn initial_fetch(&self) {
+    pub async fn initial_fetch(&self) -> Result<(), String> {
         info!("Performing initial feed retrieval");
 
         let feeds: Vec<_> = self.config.feeds.iter().collect();
@@ -89,24 +90,42 @@ impl FeedPoller {
             let storage = &self.storage;
 
             async move {
-                if let Some(channel) = fetcher.fetch_feed(feed_name, feed_config).await {
-                    let items = channel.into_items();
-                    let mut guids = HashSet::new();
+                match fetcher.fetch_feed(feed_name, feed_config).await {
+                    Some(channel) => {
+                        let title = channel.title().to_string();
+                        let description = channel.description().to_string();
+                        let items = channel.into_items();
+                        let mut guids = HashSet::new();
 
-                    for item in &items {
-                        guids.insert(item_to_guid(item));
+                        for item in &items {
+                            guids.insert(item_to_guid(item));
+                        }
+
+                        storage
+                            .store_initial_items(
+                                feed_name.clone(),
+                                items,
+                                guids,
+                                Some(title),
+                                Some(description),
+                            )
+                            .await;
+                        Ok(())
                     }
-
-                    storage
-                        .store_initial_items(feed_name.clone(), items, guids)
-                        .await;
+                    None => Err(format!("Failed to fetch feed: {}", feed_name)),
                 }
             }
         });
 
-        stream::iter(fetch_tasks)
+        let results: Vec<Result<(), String>> = stream::iter(fetch_tasks)
             .buffer_unordered(5)
-            .collect::<Vec<_>>()
+            .collect()
             .await;
+
+        for result in results {
+            result?;
+        }
+
+        Ok(())
     }
 }

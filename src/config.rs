@@ -15,7 +15,6 @@ pub struct Config {
 pub struct LlmConfig {
     pub api_key: String,
     pub model: String,
-    pub thinking_enabled: Option<bool>,
     pub prompt: String,
 }
 

@@ -39,7 +39,10 @@ async fn main() {
     let poller = FeedPoller::new(config.clone(), storage.clone(), llm_filter);
 
     // Perform initial fetch
-    poller.initial_fetch().await;
+    if let Err(e) = poller.initial_fetch().await {
+        error!("Failed during initial feed fetch: {}", e);
+        std::process::exit(1);
+    }
 
     // Start feed polling in background
     let poller_handle = tokio::spawn(async move {

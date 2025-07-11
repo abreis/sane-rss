@@ -10,6 +10,8 @@ An RSS filtering service that uses LLMs to intelligently filter feed items based
 - Configurable via TOML file
 - In-memory storage (no database required)
 - Automatic periodic polling of feeds
+- Parallel feed fetching on startup for improved performance
+- LLM filtering includes article URLs for more accurate content analysis
 
 ## Installation
 

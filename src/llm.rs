@@ -67,8 +67,8 @@ impl LlmFilter {
             .replace("{title}", title)
             .replace("{description}", description)
             .replace("{link}", link)
-            .replace("{accept_topics}", &accept_topics.join(", "))
-            .replace("{reject_topics}", &reject_topics.join(", "));
+            .replace("{accept_topics}", &accept_topics.join("; "))
+            .replace("{reject_topics}", &reject_topics.join("; "));
 
         match self.call_anthropic_api(&prompt).await {
             Ok(response) => {
@@ -85,42 +85,24 @@ impl LlmFilter {
         }
     }
 
-    async fn call_anthropic_api(&self, prompt: &str) -> Result<FilterResponse, Box<dyn std::error::Error>> {
-        let mut request_body = serde_json::json!({
+    async fn call_anthropic_api(
+        &self,
+        prompt: &str,
+    ) -> Result<FilterResponse, Box<dyn std::error::Error>> {
+        let request_body = serde_json::json!({
             "model": self.config.model,
-            "max_tokens": 50,
+            "max_tokens": 1024,
             "messages": [{
                 "role": "user",
                 "content": prompt
             }],
-            "response": {
-                "type": "json_object",
-                "json_schema": {
-                    "name": "filter_response",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "accept": { "type": "boolean" },
-                            "reject": { "type": "boolean" }
-                        },
-                        "required": ["accept", "reject"]
-                    }
-                }
-            }
         });
-
-        if let Some(thinking) = self.config.thinking_enabled {
-            if thinking {
-                request_body["enable_thinking"] = serde_json::Value::Bool(true);
-            }
-        }
 
         let response = self
             .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
-            .header("anthropic-dangerous-direct-browser-access", "true")
             .header("content-type", "application/json")
             .json(&request_body)
             .send()
@@ -133,7 +115,7 @@ impl LlmFilter {
         }
 
         let api_response: serde_json::Value = response.json().await?;
-        
+
         let content = api_response["content"][0]["text"]
             .as_str()
             .ok_or("No text content in response")?;

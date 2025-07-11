@@ -27,17 +27,31 @@ async fn serve_feed(
     Path(feed_name): Path<String>,
     State(state): State<Arc<ServerState>>,
 ) -> Response {
-    match state.storage.get_feed_items(&feed_name).await {
-        Some(items) => {
+    match state.storage.feeds.read().await.get(&feed_name) {
+        Some(feed) => {
+            let title = feed
+                .title
+                .clone()
+                .unwrap_or_else(|| format!("[F] {}", feed_name));
+            let description = feed
+                .description
+                .clone()
+                .unwrap_or_else(|| format!("Filtered RSS feed for {}", feed_name));
+            let link = format!("http://localhost:8080/{}", feed_name);
+
             let channel = ChannelBuilder::default()
-                .title(format!("Filtered: {}", feed_name))
-                .link(format!("http://localhost:8080/{}", feed_name))
-                .description(format!("Filtered RSS feed for {}", feed_name))
-                .items(items)
+                .title(title)
+                .link(link)
+                .description(description)
+                .items(feed.items.clone())
                 .build();
 
             let rss_string = channel.to_string();
-            info!("Serving feed: {} with {} items", feed_name, channel.items().len());
+            info!(
+                "Serving feed: {} with {} items",
+                feed_name,
+                channel.items().len()
+            );
             (
                 StatusCode::OK,
                 [("content-type", "application/rss+xml")],
@@ -50,10 +64,10 @@ async fn serve_feed(
 }
 
 async fn list_feeds(State(state): State<Arc<ServerState>>) -> Response {
-    let feeds = state.storage.get_all_feeds().await;
+    let feeds = state.storage.feeds.read().await;
     let feed_list: Vec<String> = feeds
         .iter()
-        .map(|(name, items)| format!("- /{} ({} items)", name, items.len()))
+        .map(|(name, feed)| format!("- /{} ({} items)", name, feed.items.len()))
         .collect();
 
     if feed_list.is_empty() {
