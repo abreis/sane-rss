@@ -69,7 +69,7 @@ impl FeedPoller {
                             .await;
 
                         if should_accept {
-                            self.storage.store_items(feed_name.clone(), vec![item], None, None).await;
+                            self.storage.store_items(feed_name.clone(), vec![item], None, None, self.config.max_items_per_feed()).await;
                             info!("Added filtered item to feed {}", feed_name);
                         } else {
                             info!("Item rejected by filter");
@@ -84,6 +84,7 @@ impl FeedPoller {
         info!("Performing initial feed retrieval");
 
         let feeds: Vec<_> = self.config.feeds.iter().collect();
+        let max_items = self.config.max_items_per_feed();
 
         let fetch_tasks = feeds.into_iter().map(|(feed_name, feed_config)| {
             let fetcher = &self.fetcher;
@@ -102,6 +103,7 @@ impl FeedPoller {
                                 items,
                                 Some(title),
                                 Some(description),
+                                max_items,
                             )
                             .await;
                         Ok(())

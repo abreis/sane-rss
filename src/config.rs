@@ -9,6 +9,7 @@ pub struct Config {
     pub server_host: Option<String>,
     pub server_port: Option<u16>,
     pub polling_interval_seconds: Option<u64>,
+    pub max_items_per_feed: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -47,5 +48,9 @@ impl Config {
 
     pub fn server_port(&self) -> u16 {
         self.server_port.unwrap_or(8080)
+    }
+
+    pub fn max_items_per_feed(&self) -> usize {
+        self.max_items_per_feed.unwrap_or(60) // Default to 60 items
     }
 }

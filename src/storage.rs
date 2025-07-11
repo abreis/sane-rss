@@ -1,6 +1,6 @@
 use crate::feed::item_to_guid;
 use rss::Item;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -10,7 +10,7 @@ use tracing::info;
 pub struct Feed {
     pub title: Option<String>,
     pub description: Option<String>,
-    pub items: Vec<Item>,
+    pub items: VecDeque<Item>,
 }
 
 #[derive(Clone)]
@@ -33,6 +33,7 @@ impl FeedStorage {
         items: Vec<Item>,
         title: Option<String>,
         description: Option<String>,
+        max_items: usize,
     ) {
         use std::collections::hash_map::Entry;
 
@@ -59,13 +60,32 @@ impl FeedStorage {
                 if description.is_some() {
                     feed.description = description;
                 }
-                feed.items.extend(items);
+                
+                // Add new items using push_back
+                for item in items {
+                    feed.items.push_back(item);
+                    
+                    // Remove oldest items if we exceed the limit
+                    while feed.items.len() > max_items {
+                        feed.items.pop_front();
+                    }
+                }
             }
             Entry::Vacant(entry) => {
+                let mut deque = VecDeque::with_capacity(max_items);
+                for item in items {
+                    deque.push_back(item);
+                    
+                    // Ensure we don't exceed the limit even on initial insert
+                    while deque.len() > max_items {
+                        deque.pop_front();
+                    }
+                }
+                
                 entry.insert(Feed {
                     title,
                     description,
-                    items,
+                    items: deque,
                 });
             }
         }

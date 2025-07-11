@@ -5,6 +5,9 @@ polling_interval_seconds = 300
 server_host = "127.0.0.1"
 server_port = 8080
 
+# Maximum number of items to keep per feed (default: 60)
+max_items_per_feed = 60
+
 [llm]
 api_key = "YOUR_ANTHROPIC_API_KEY"
 model = "claude-3-5-sonnet-20241022"
@@ -14,9 +17,7 @@ You are an RSS feed filter. Analyze the following RSS post and determine if it m
 
 Post title: {title}
 Post description: {description}
-Post URL: {link}
-
-If the URL is provided and not empty, please fetch and read the content at that URL to better understand the post's content and make a more informed filtering decision.
+Post content excerpt: {content_excerpt}
 
 Accept topics: {accept_topics}
 Reject topics: {reject_topics}

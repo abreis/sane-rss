@@ -43,7 +43,7 @@ async fn serve_feed(
                 .title(title)
                 .link(link)
                 .description(description)
-                .items(feed.items.clone())
+                .items(feed.items.iter().cloned().collect::<Vec<_>>())
                 .build();
 
             let rss_string = channel.to_string();

@@ -1,5 +1,6 @@
 use crate::config::{Filters, LlmConfig};
 use rss::Item;
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -33,7 +34,7 @@ impl LlmFilter {
     ) -> bool {
         let title = item.title().unwrap_or("No title");
         let description = item.description().unwrap_or("No description");
-        let link = item.link().unwrap_or("");
+        let content_excerpt = self.extract_content_text(item);
 
         let mut accept_topics = Vec::new();
         let mut reject_topics = Vec::new();
@@ -66,7 +67,7 @@ impl LlmFilter {
             .prompt
             .replace("{title}", title)
             .replace("{description}", description)
-            .replace("{link}", link)
+            .replace("{content_excerpt}", &content_excerpt)
             .replace("{accept_topics}", &accept_topics.join("; "))
             .replace("{reject_topics}", &reject_topics.join("; "));
 
@@ -122,5 +123,73 @@ impl LlmFilter {
 
         let filter_response: FilterResponse = serde_json::from_str(content)?;
         Ok(filter_response)
+    }
+
+    fn extract_content_text(&self, item: &Item) -> String {
+        let content = item.content().unwrap_or("");
+        if content.is_empty() {
+            return String::new();
+        }
+
+        let document = Html::parse_document(content);
+        let selector = Selector::parse("p").unwrap();
+        let mut extracted_text = String::new();
+        let max_chars: usize = 1000;
+
+        for element in document.select(&selector) {
+            let text = element.text().collect::<String>().trim().to_string();
+            if !text.is_empty() {
+                let remaining = max_chars.saturating_sub(extracted_text.len());
+                if remaining == 0 {
+                    break;
+                }
+
+                if extracted_text.len() + text.len() <= max_chars {
+                    if !extracted_text.is_empty() {
+                        extracted_text.push(' ');
+                    }
+                    extracted_text.push_str(&text);
+                } else {
+                    let truncated = &text[..remaining.min(text.len())];
+                    if !extracted_text.is_empty() {
+                        extracted_text.push(' ');
+                    }
+                    extracted_text.push_str(truncated);
+                    break;
+                }
+            }
+        }
+
+        extracted_text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rss::Channel;
+
+    #[test]
+    fn test_extract_content_text() {
+        let feed_xml = r#"<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title><![CDATA[Astral Codex Ten]]></title><description><![CDATA[P(A|B) = [P(A)*P(B|A)]/P(B), all the rest is commentary.]]></description><item><title><![CDATA[Practically-A-Book Review: Byrnes on Trance]]></title><description><![CDATA[...]]></description><link>https://www.astralcodexten.com/p/practically-a-book-review-byrnes</link><guid isPermaLink="false">https://www.astralcodexten.com/p/practically-a-book-review-byrnes</guid><dc:creator><![CDATA[Scott Alexander]]></dc:creator><pubDate>Wed, 09 Jul 2025 11:28:42 GMT</pubDate><enclosure url="https://substack-post-media.s3.amazonaws.com/public/images/f0b86839-2368-4b49-9211-592283ae668a_336x279.png" length="0" type="image/jpeg"/><content:encoded><![CDATA[<p>Steven Byrnes is a physicist/AI researcher/amateur neuroscientist; needless to say, he blogs on Less Wrong. I finally got around to reading <strong><a href="https://www.lesswrong.com/s/qhdHbCJ3PYesL9dde">his 2024 series giving a predictive processing perspective on intuitive self-models</a></strong>. If that sounds boring, it shouldn&#8217;t: Byrnes charges head-on into some of the toughest subjects in psychology, including trance, amnesia, and multiple personalities. I found his perspective enlightening (no pun intended; meditation is another one of his topics) and thought I would share. </p><p>It all centers around this picture:</p><div class="captioned-image-container"><figure><a class="image-link image2" target="_blank" href="https://substackcdn.com/image/fetch/$s_!v7ZB!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png" data-component-name="Image2ToDOM"><div class="image2-inset"><picture><source type="image/webp" srcset="https://substackcdn.com/image/fetch/$s_!v7ZB!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 424w, https://substackcdn.com/image/fetch/$s_!v7ZB!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 848w, https://substackcdn.com/image/fetch/$s_!v7ZB!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 1272w, https://substackcdn.com/image/fetch/$s_!v7ZB!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 1456w" sizes="100vw"><img src="https://substackcdn.com/image/fetch/$s_!v7ZB!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png" width="287" height="234" data-attrs="{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/39854132-188a-4637-9b79-99b055ea5e89_287x234.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:234,&quot;width&quot;:287,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:11117,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:false,&quot;topImage&quot;:true,&quot;internalRedirect&quot;:&quot;https://www.astralcodexten.com/i/166402303?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}" class="sizing-normal" alt="" srcset="https://substackcdn.com/image/fetch/$s_!v7ZB!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 424w, https://substackcdn.com/image/fetch/$s_!v7ZB!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 848w, https://substackcdn.com/image/fetch/$s_!v7ZB!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 1272w, https://substackcdn.com/image/fetch/$s_!v7ZB!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F39854132-188a-4637-9b79-99b055ea5e89_287x234.png 1456w" sizes="100vw" fetchpriority="high"></picture><div></div></div></a></figure></div><p>But first: some excruciatingly obvious philosophical preliminaries.</p><p>We don&#8217;t directly perceive the external world. Every philosopher has their own way of saying exactly what it is we <em>do</em> perceive, but the predictive processing interpretation is that we perceive our models of the world. To be very naive and hand-wavey, lower-level brain centers get sense-data, make a guess about what produced that sense data, then &#8220;show&#8221; &#8220;us&#8221; that guess. If the guess is wrong, too bad - we see the incorrect guess, not the reality. </p>]]></content:encoded></item></channel></rss>"#;
+
+        // Parse the RSS feed
+        let channel = Channel::read_from(feed_xml.as_bytes()).expect("Failed to parse RSS feed");
+        let item = channel.items().first().expect("No items in feed");
+
+        // Create a mock LLM config for testing
+        let config = LlmConfig {
+            api_key: "test_key".to_string(),
+            model: "test_model".to_string(),
+            prompt: "test_prompt".to_string(),
+        };
+        let llm_filter = LlmFilter::new(config);
+
+        // Test the extract_content_text function
+        let extracted_text = llm_filter.extract_content_text(item);
+
+        let expected_text = r#"Steven Byrnes is a physicist/AI researcher/amateur neuroscientist; needless to say, he blogs on Less Wrong. I finally got around to reading his 2024 series giving a predictive processing perspective on intuitive self-models. If that sounds boring, it shouldn’t: Byrnes charges head-on into some of the toughest subjects in psychology, including trance, amnesia, and multiple personalities. I found his perspective enlightening (no pun intended; meditation is another one of his topics) and thought I would share. It all centers around this picture: But first: some excruciatingly obvious philosophical preliminaries. We don’t directly perceive the external world. Every philosopher has their own way of saying exactly what it is we do perceive, but the predictive processing interpretation is that we perceive our models of the world. To be very naive and hand-wavey, lower-level brain centers get sense-data, make a guess about what produced that sense data, then “show” “us” that guess. "#;
+
+        assert_eq!(extracted_text, expected_text)
     }
 }
