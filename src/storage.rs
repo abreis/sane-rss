@@ -1,3 +1,4 @@
+use crate::feed::item_to_guid;
 use rss::Item;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -26,41 +27,55 @@ impl FeedStorage {
         }
     }
 
-    pub async fn store_initial_items(
+    pub async fn store_items(
         &self,
         feed_name: String,
         items: Vec<Item>,
-        guids: HashSet<String>,
         title: Option<String>,
         description: Option<String>,
     ) {
+        use std::collections::hash_map::Entry;
+
         let mut feeds = self.feeds.write().await;
         let mut seen = self.seen_guids.write().await;
 
         info!(
-            "Storing {} initial items for feed {}",
+            "Storing {} items for feed {}",
             items.len(),
             feed_name
         );
 
-        let feed = Feed {
-            title,
-            description,
-            items,
-        };
+        let mut guids = HashSet::new();
+        for item in &items {
+            guids.insert(item_to_guid(item));
+        }
 
-        feeds.insert(feed_name.clone(), feed);
-        seen.insert(feed_name, guids);
-    }
+        match feeds.entry(feed_name.clone()) {
+            Entry::Occupied(mut entry) => {
+                let feed = entry.get_mut();
+                if title.is_some() {
+                    feed.title = title;
+                }
+                if description.is_some() {
+                    feed.description = description;
+                }
+                feed.items.extend(items);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Feed {
+                    title,
+                    description,
+                    items,
+                });
+            }
+        }
 
-    pub async fn add_filtered_item(&self, feed_name: &str, item: Item, guid: String) {
-        let mut feeds = self.feeds.write().await;
-        let mut seen = self.seen_guids.write().await;
-
-        if let Some(feed) = feeds.get_mut(feed_name) {
-            feed.items.push(item);
-            if let Some(feed_guids) = seen.get_mut(feed_name) {
-                feed_guids.insert(guid);
+        match seen.entry(feed_name) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().extend(guids);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(guids);
             }
         }
     }

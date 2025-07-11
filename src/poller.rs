@@ -5,7 +5,7 @@ use crate::{
     storage::FeedStorage,
 };
 use futures::stream::{self, StreamExt};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::time;
 use tracing::{debug, info};
 
@@ -69,7 +69,7 @@ impl FeedPoller {
                             .await;
 
                         if should_accept {
-                            self.storage.add_filtered_item(feed_name, item, guid).await;
+                            self.storage.store_items(feed_name.clone(), vec![item], None, None).await;
                             info!("Added filtered item to feed {}", feed_name);
                         } else {
                             info!("Item rejected by filter");
@@ -95,17 +95,11 @@ impl FeedPoller {
                         let title = channel.title().to_string();
                         let description = channel.description().to_string();
                         let items = channel.into_items();
-                        let mut guids = HashSet::new();
-
-                        for item in &items {
-                            guids.insert(item_to_guid(item));
-                        }
 
                         storage
-                            .store_initial_items(
+                            .store_items(
                                 feed_name.clone(),
                                 items,
-                                guids,
                                 Some(title),
                                 Some(description),
                             )
