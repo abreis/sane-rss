@@ -1,0 +1,26 @@
+[Unit]
+Description=Sane RSS - AI-powered RSS feed reader
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sane-rss
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sane-rss
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/sane-rss /var/lib/sane-rss
+
+# Run as a dedicated user (optional)
+# User=sane-rss
+# Group=sane-rss
+
+[Install]
+WantedBy=multi-user.target
