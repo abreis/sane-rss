@@ -58,7 +58,6 @@ impl LlmFilter {
         }
 
         if accept_topics.is_empty() && reject_topics.is_empty() {
-            info!("No filters configured, accepting item: {}", title);
             return true;
         }
 
@@ -73,11 +72,14 @@ impl LlmFilter {
 
         match self.call_anthropic_api(&prompt).await {
             Ok(response) => {
-                info!(
-                    "LLM filter result for '{}': accept={}, reject={}",
-                    title, response.accept, response.reject
-                );
-                response.accept || (!response.reject && accept_topics.is_empty())
+                if response.reject {
+                    info!(
+                        "LLM filter rejected '{}': accept={}, reject={}",
+                        title, response.accept, response.reject
+                    );
+                }
+
+                response.accept || !response.reject
             }
             Err(e) => {
                 error!("Failed to filter item '{}': {}", title, e);

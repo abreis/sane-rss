@@ -8,7 +8,7 @@ use axum::{
 };
 use rss::ChannelBuilder;
 use std::sync::Arc;
-use tracing::info;
+use tracing::debug;
 
 pub struct ServerState {
     pub storage: FeedStorage,
@@ -37,21 +37,21 @@ async fn serve_feed(
                 .description
                 .clone()
                 .unwrap_or_else(|| format!("Filtered RSS feed for {}", feed_name));
-            let link = format!("http://localhost:8080/{}", feed_name);
 
             let channel = ChannelBuilder::default()
                 .title(title)
-                .link(link)
                 .description(description)
                 .items(feed.items.iter().cloned().collect::<Vec<_>>())
                 .build();
 
             let rss_string = channel.to_string();
-            info!(
+
+            debug!(
                 "Serving feed: {} with {} items",
                 feed_name,
                 channel.items().len()
             );
+
             (
                 StatusCode::OK,
                 [("content-type", "application/rss+xml")],
