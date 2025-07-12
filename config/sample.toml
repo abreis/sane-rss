@@ -23,10 +23,12 @@ Accept topics: {accept_topics}
 Reject topics: {reject_topics}
 
 Return a JSON response with two boolean fields:
-- "accept": true if the post matches any accept topics
-- "reject": true if the post matches any reject topics
+- "accept": true if the post matches any accept topics, otherwise false
+- "reject": true if the post matches any reject topics, otherwise false
 
-If both fields are true, the post will be accepted.
+Both fields can be true at the same time. If both fields are true, the post will be accepted.
+
+You must respond with valid JSON in exactly this format: {"accept": true/false, "reject": true/false}
 """
 
 [global_filters]

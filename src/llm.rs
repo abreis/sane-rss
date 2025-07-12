@@ -189,7 +189,7 @@ mod tests {
 
         Both fields can be true at the same time. If both fields are true, the post will be accepted.
 
-        You must respond with valid JSON in exactly this format: {{"accept": true/false, "reject": true/false}}"#
+        You must respond with valid JSON in exactly this format: {"accept": true/false, "reject": true/false}"#
     }
 
     fn test_llmconfig_noapi() -> LlmConfig {
