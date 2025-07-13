@@ -69,7 +69,15 @@ impl FeedPoller {
                             .await;
 
                         if should_accept {
-                            self.storage.store_items(feed_name.clone(), vec![item], None, None, self.config.max_items_per_feed()).await;
+                            self.storage
+                                .store_items(
+                                    feed_name.clone(),
+                                    vec![item],
+                                    None,
+                                    None,
+                                    self.config.max_items_per_feed(),
+                                )
+                                .await;
                             info!("Added filtered item to feed {}", feed_name);
                         } else {
                             info!("Item rejected by filter");
@@ -106,6 +114,12 @@ impl FeedPoller {
                                 max_items,
                             )
                             .await;
+
+                        // Fetch favicon during initial retrieval
+                        if let Some(favicon_data) = fetcher.fetch_favicon(&feed_config.url).await {
+                            storage.store_favicon(feed_name, favicon_data).await;
+                        }
+
                         Ok(())
                     }
                     None => Err(format!("Failed to fetch feed: {}", feed_name)),

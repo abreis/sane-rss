@@ -19,7 +19,8 @@ pub fn create_router(storage: FeedStorage) -> Router {
 
     Router::new()
         .route("/:feed_name", get(serve_feed))
-        .route("/", get(list_feeds))
+        .route("/:feed_name/favicon.ico", get(serve_favicon))
+        .route("/feeds", get(list_feeds))
         .with_state(state)
 }
 
@@ -75,5 +76,30 @@ async fn list_feeds(State(state): State<Arc<ServerState>>) -> Response {
     } else {
         let response = format!("Available feeds:\n{}", feed_list.join("\n"));
         (StatusCode::OK, response).into_response()
+    }
+}
+
+async fn serve_favicon(
+    Path(feed_name): Path<String>,
+    State(state): State<Arc<ServerState>>,
+) -> Response {
+    match state.storage.get_favicon(&feed_name).await {
+        Some(favicon_data) => {
+            debug!(
+                "Serving favicon for feed: {} ({} bytes)",
+                feed_name,
+                favicon_data.len()
+            );
+            (
+                StatusCode::OK,
+                [("content-type", "image/x-icon")],
+                favicon_data,
+            )
+                .into_response()
+        }
+        None => {
+            debug!("No favicon found for feed: {}", feed_name);
+            (StatusCode::NOT_FOUND, "Favicon not found").into_response()
+        }
     }
 }

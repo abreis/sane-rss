@@ -2,6 +2,7 @@ use crate::config::FeedConfig;
 use rss::{Channel, Item};
 use std::time::Duration;
 use tracing::{debug, error, warn};
+use url::Url;
 
 pub struct FeedFetcher {
     client: reqwest::Client,
@@ -43,6 +44,54 @@ impl FeedFetcher {
             },
             Err(e) => {
                 warn!("Failed to fetch feed {}: {}", feed_name, e);
+                None
+            }
+        }
+    }
+
+    pub async fn fetch_favicon(&self, feed_url: &str) -> Option<Vec<u8>> {
+        // Parse the feed URL to get the base domain
+        let url = match Url::parse(feed_url) {
+            Ok(url) => url,
+            Err(e) => {
+                warn!("Failed to parse feed URL {}: {}", feed_url, e);
+                return None;
+            }
+        };
+
+        // Construct favicon URL at the root of the domain (scheme + authority)
+        let root_url = format!("{}://{}", url.scheme(), url.authority());
+        let favicon_url = match Url::parse(&root_url).and_then(|u| u.join("/favicon.ico")) {
+            Ok(url) => url,
+            Err(e) => {
+                warn!("Failed to construct favicon URL: {}", e);
+                return None;
+            }
+        };
+
+        debug!("Fetching favicon from: {}", favicon_url);
+
+        // Try to fetch the favicon
+        match self.client.get(favicon_url.as_str()).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.bytes().await {
+                        Ok(bytes) => {
+                            debug!("Successfully fetched favicon ({} bytes)", bytes.len());
+                            Some(bytes.to_vec())
+                        }
+                        Err(e) => {
+                            debug!("Failed to read favicon response: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    debug!("Favicon request returned status: {}", response.status());
+                    None
+                }
+            }
+            Err(e) => {
+                debug!("Failed to fetch favicon: {}", e);
                 None
             }
         }

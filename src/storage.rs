@@ -11,6 +11,7 @@ pub struct Feed {
     pub title: Option<String>,
     pub description: Option<String>,
     pub items: VecDeque<Item>,
+    pub favicon: Option<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -40,11 +41,7 @@ impl FeedStorage {
         let mut feeds = self.feeds.write().await;
         let mut seen = self.seen_guids.write().await;
 
-        info!(
-            "Storing {} items for feed {}",
-            items.len(),
-            feed_name
-        );
+        info!("Storing {} items for feed {}", items.len(), feed_name);
 
         let mut guids = HashSet::new();
         for item in &items {
@@ -60,11 +57,11 @@ impl FeedStorage {
                 if description.is_some() {
                     feed.description = description;
                 }
-                
+
                 // Add new items using push_back
                 for item in items {
                     feed.items.push_back(item);
-                    
+
                     // Remove oldest items if we exceed the limit
                     while feed.items.len() > max_items {
                         feed.items.pop_front();
@@ -75,17 +72,18 @@ impl FeedStorage {
                 let mut deque = VecDeque::with_capacity(max_items);
                 for item in items {
                     deque.push_back(item);
-                    
+
                     // Ensure we don't exceed the limit even on initial insert
                     while deque.len() > max_items {
                         deque.pop_front();
                     }
                 }
-                
+
                 entry.insert(Feed {
                     title,
                     description,
                     items: deque,
+                    favicon: None,
                 });
             }
         }
@@ -107,5 +105,18 @@ impl FeedStorage {
         } else {
             true
         }
+    }
+
+    pub async fn store_favicon(&self, feed_name: &str, favicon_data: Vec<u8>) {
+        let mut feeds = self.feeds.write().await;
+        if let Some(feed) = feeds.get_mut(feed_name) {
+            feed.favicon = Some(favicon_data);
+            info!("Stored favicon for feed {}", feed_name);
+        }
+    }
+
+    pub async fn get_favicon(&self, feed_name: &str) -> Option<Vec<u8>> {
+        let feeds = self.feeds.read().await;
+        feeds.get(feed_name).and_then(|feed| feed.favicon.clone())
     }
 }
