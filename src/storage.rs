@@ -39,14 +39,8 @@ impl FeedStorage {
         use std::collections::hash_map::Entry;
 
         let mut feeds = self.feeds.write().await;
-        let mut seen = self.seen_guids.write().await;
 
         info!("Storing {} items for feed {}", items.len(), feed_name);
-
-        let mut guids = HashSet::new();
-        for item in &items {
-            guids.insert(item_to_guid(item));
-        }
 
         match feeds.entry(feed_name.clone()) {
             Entry::Occupied(mut entry) => {
@@ -59,8 +53,8 @@ impl FeedStorage {
                 }
 
                 // Add new items using push_back
-                for item in items {
-                    feed.items.push_back(item);
+                for item in &items {
+                    feed.items.push_back(item.clone());
 
                     // Remove oldest items if we exceed the limit
                     while feed.items.len() > max_items {
@@ -70,8 +64,8 @@ impl FeedStorage {
             }
             Entry::Vacant(entry) => {
                 let mut deque = VecDeque::with_capacity(max_items);
-                for item in items {
-                    deque.push_back(item);
+                for item in &items {
+                    deque.push_back(item.clone());
 
                     // Ensure we don't exceed the limit even on initial insert
                     while deque.len() > max_items {
@@ -88,13 +82,12 @@ impl FeedStorage {
             }
         }
 
-        match seen.entry(feed_name) {
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().extend(guids);
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(guids);
-            }
+        // Drop the write lock before calling mark_item_as_seen
+        drop(feeds);
+
+        // Mark all items as seen using the dedicated method
+        for item in &items {
+            self.mark_item_as_seen(&feed_name, item_to_guid(item)).await;
         }
     }
 
@@ -118,5 +111,22 @@ impl FeedStorage {
     pub async fn get_favicon(&self, feed_name: &str) -> Option<Vec<u8>> {
         let feeds = self.feeds.read().await;
         feeds.get(feed_name).and_then(|feed| feed.favicon.clone())
+    }
+
+    pub async fn mark_item_as_seen(&self, feed_name: &str, guid: String) {
+        use std::collections::hash_map::Entry;
+        
+        let mut seen = self.seen_guids.write().await;
+        
+        match seen.entry(feed_name.to_string()) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().insert(guid);
+            }
+            Entry::Vacant(entry) => {
+                let mut guids = HashSet::new();
+                guids.insert(guid);
+                entry.insert(guids);
+            }
+        }
     }
 }

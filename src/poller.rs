@@ -81,6 +81,8 @@ impl FeedPoller {
                             info!("Added filtered item to feed {}", feed_name);
                         } else {
                             info!("Item rejected by filter");
+                            // Mark rejected items as seen to avoid reprocessing
+                            self.storage.mark_item_as_seen(feed_name, guid).await;
                         }
                     }
                 }
