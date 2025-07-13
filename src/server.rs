@@ -1,10 +1,10 @@
 use crate::storage::FeedStorage;
 use axum::{
+    Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Router,
 };
 use rss::ChannelBuilder;
 use std::sync::Arc;
@@ -18,8 +18,8 @@ pub fn create_router(storage: FeedStorage) -> Router {
     let state = Arc::new(ServerState { storage });
 
     Router::new()
-        .route("/:feed_name", get(serve_feed))
-        .route("/:feed_name/favicon.ico", get(serve_favicon))
+        .route("/{feed_name}", get(serve_feed))
+        .route("/{feed_name}/favicon.ico", get(serve_favicon))
         .route("/feeds", get(list_feeds))
         .with_state(state)
 }
