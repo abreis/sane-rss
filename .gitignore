@@ -1,0 +1,16 @@
+# Filesystem
+.DS_Store
+Cargo.lock
+**/*.rs.bk
+/target/
+
+# Every directory except whitelist.
+/*/
+!/build/
+!/src/
+!/config/
+
+# Every markdown except whitelist.
+/*.md
+!/CHANGELOG.md
+!/README.md

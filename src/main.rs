@@ -23,10 +23,18 @@ async fn main() {
         .nth(1)
         .unwrap_or_else(|| "config.toml".to_string());
 
-    let config = match Config::from_file(&config_path) {
+    let config_path = match std::fs::canonicalize(&config_path) {
+        Ok(path) => path,
+        Err(e) => {
+            error!("Failed to resolve config path '{}': {}", config_path, e);
+            std::process::exit(1);
+        }
+    };
+
+    let config = match Config::from_path(&config_path) {
         Ok(cfg) => Arc::new(cfg),
         Err(e) => {
-            error!("Failed to load configuration from {}: {}", config_path, e);
+            error!("Failed to load configuration from {:?}: {}", config_path, e);
             std::process::exit(1);
         }
     };
@@ -34,7 +42,19 @@ async fn main() {
     info!("Configuration loaded successfully");
 
     // Initialize components
-    let storage = FeedStorage::new();
+    let storage = {
+        let storage = FeedStorage::new();
+
+        // Attempt to load previously seen feed items.
+        if let Some(cache_file) = &config.guid_cache_file {
+            info!("Loading seen feed items from {:?}...", cache_file);
+            if let Err(error) = storage.load_seen_guids(cache_file).await {
+                error!("failed to load items: {}", error);
+            }
+        }
+
+        Arc::new(storage)
+    };
     let llm_filter = Arc::new(LlmFilter::new(config.llm.clone()));
     let poller = FeedPoller::new(config.clone(), storage.clone(), llm_filter);
 
@@ -50,7 +70,7 @@ async fn main() {
     });
 
     // Start HTTP server
-    let app = create_router(storage);
+    let app = create_router(storage.clone());
 
     let addr = format!("{}:{}", config.server_host(), config.server_port());
 
@@ -80,6 +100,13 @@ async fn main() {
         }
         _ = tokio::signal::ctrl_c() => {
             info!("Received shutdown signal, stopping...");
+
+            if let Some(cache_file) = &config.guid_cache_file {
+                info!("Storing seen feed items to {:?}...", cache_file);
+                if let Err(error) = storage.save_seen_guids(cache_file).await {
+                    error!("failed to store items: {}", error);
+                }
+            }
         }
     }
 }

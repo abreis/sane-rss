@@ -8,6 +8,9 @@ server_port = 8080
 # Maximum number of items to keep per feed (default: 60)
 max_items_per_feed = 60
 
+# File name to keep seen items across restarts. Kept in config directory.
+guid_cache_file = "seen_items.json"
+
 [llm]
 api_key = "YOUR_ANTHROPIC_API_KEY"
 model = "claude-3-5-sonnet-20241022"

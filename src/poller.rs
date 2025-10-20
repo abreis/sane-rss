@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    feed::{item_to_guid, FeedFetcher},
+    feed::{FeedFetcher, item_to_guid},
     llm::LlmFilter,
     storage::FeedStorage,
 };
@@ -11,13 +11,13 @@ use tracing::{debug, info};
 
 pub struct FeedPoller {
     config: Arc<Config>,
-    storage: FeedStorage,
+    storage: Arc<FeedStorage>,
     fetcher: FeedFetcher,
     filter: Arc<LlmFilter>,
 }
 
 impl FeedPoller {
-    pub fn new(config: Arc<Config>, storage: FeedStorage, filter: Arc<LlmFilter>) -> Self {
+    pub fn new(config: Arc<Config>, storage: Arc<FeedStorage>, filter: Arc<LlmFilter>) -> Self {
         Self {
             config,
             storage,
@@ -52,38 +52,41 @@ impl FeedPoller {
                 for item in items {
                     let guid = item_to_guid(&item);
 
-                    if self.storage.is_new_item(feed_name, &guid).await {
-                        info!(
-                            "Found new item in feed {}: {}",
-                            feed_name,
-                            item.title().unwrap_or("No title")
-                        );
+                    // Skip items we've seen before.
+                    if !self.storage.is_new_item(feed_name, &guid).await {
+                        return;
+                    }
 
-                        let should_accept = self
-                            .filter
-                            .should_accept_item(
-                                &item,
-                                &self.config.global_filters,
-                                &feed_config.filters,
+                    info!(
+                        "Found new item in feed {}: {}",
+                        feed_name,
+                        item.title().unwrap_or("No title")
+                    );
+
+                    let should_accept = self
+                        .filter
+                        .should_accept_item(
+                            &item,
+                            &self.config.global_filters,
+                            &feed_config.filters,
+                        )
+                        .await;
+
+                    if should_accept {
+                        self.storage
+                            .store_items(
+                                feed_name.clone(),
+                                vec![item],
+                                None,
+                                None,
+                                self.config.max_items_per_feed(),
                             )
                             .await;
-
-                        if should_accept {
-                            self.storage
-                                .store_items(
-                                    feed_name.clone(),
-                                    vec![item],
-                                    None,
-                                    None,
-                                    self.config.max_items_per_feed(),
-                                )
-                                .await;
-                            info!("Added filtered item to feed {}", feed_name);
-                        } else {
-                            info!("Item rejected by filter");
-                            // Mark rejected items as seen to avoid reprocessing
-                            self.storage.mark_item_as_seen(feed_name, guid).await;
-                        }
+                        info!("Added filtered item to feed {}", feed_name);
+                    } else {
+                        info!("Item rejected by filter");
+                        // Mark rejected items as seen to avoid reprocessing
+                        self.storage.mark_item_as_seen(feed_name, guid).await;
                     }
                 }
             }

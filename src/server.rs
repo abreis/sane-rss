@@ -11,10 +11,10 @@ use std::sync::Arc;
 use tracing::debug;
 
 pub struct ServerState {
-    pub storage: FeedStorage,
+    pub storage: Arc<FeedStorage>,
 }
 
-pub fn create_router(storage: FeedStorage) -> Router {
+pub fn create_router(storage: Arc<FeedStorage>) -> Router {
     let state = Arc::new(ServerState { storage });
 
     Router::new()

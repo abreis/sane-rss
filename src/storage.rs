@@ -1,6 +1,7 @@
 use crate::feed::item_to_guid;
 use rss::Item;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -115,9 +116,9 @@ impl FeedStorage {
 
     pub async fn mark_item_as_seen(&self, feed_name: &str, guid: String) {
         use std::collections::hash_map::Entry;
-        
+
         let mut seen = self.seen_guids.write().await;
-        
+
         match seen.entry(feed_name.to_string()) {
             Entry::Occupied(mut entry) => {
                 entry.get_mut().insert(guid);
@@ -128,5 +129,36 @@ impl FeedStorage {
                 entry.insert(guids);
             }
         }
+    }
+}
+
+impl FeedStorage {
+    pub async fn save_seen_guids(&self, path: &PathBuf) -> std::io::Result<()> {
+        let seen = self.seen_guids.read().await;
+        let json = serde_json::to_string(&*seen)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub async fn load_seen_guids(&self, path: &PathBuf) -> std::io::Result<()> {
+        use std::io::ErrorKind;
+
+        let json = match std::fs::read_to_string(path) {
+            Ok(content) => {
+                if content.is_empty() {
+                    return Ok(());
+                }
+                content
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+
+        let loaded: HashMap<String, HashSet<String>> = serde_json::from_str(&json)?;
+        let mut seen = self.seen_guids.write().await;
+        *seen = loaded;
+        Ok(())
     }
 }

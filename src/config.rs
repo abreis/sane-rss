@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -10,6 +10,7 @@ pub struct Config {
     pub server_port: Option<u16>,
     pub polling_interval_seconds: Option<u64>,
     pub max_items_per_feed: Option<usize>,
+    pub guid_cache_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -32,9 +33,17 @@ pub struct FeedConfig {
 }
 
 impl Config {
-    pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_path(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+
+        // Place the guid cache file in the config directory.
+        if let Some(guid_filename) = &config.guid_cache_file {
+            let mut guid_file_path = path.clone();
+            guid_file_path.set_file_name(guid_filename);
+            config.guid_cache_file = Some(guid_file_path);
+        }
+
         Ok(config)
     }
 
