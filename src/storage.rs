@@ -2,7 +2,6 @@ use crate::feed::item_to_guid;
 use rss::Item;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -15,17 +14,16 @@ pub struct Feed {
     pub favicon: Option<Vec<u8>>,
 }
 
-#[derive(Clone)]
 pub struct FeedStorage {
-    pub feeds: Arc<RwLock<HashMap<String, Feed>>>,
-    pub seen_guids: Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    pub feeds: RwLock<HashMap<String, Feed>>,
+    pub seen_guids: RwLock<HashMap<String, HashSet<String>>>,
 }
 
 impl FeedStorage {
     pub fn new() -> Self {
         Self {
-            feeds: Arc::new(RwLock::new(HashMap::new())),
-            seen_guids: Arc::new(RwLock::new(HashMap::new())),
+            feeds: RwLock::new(HashMap::new()),
+            seen_guids: RwLock::new(HashMap::new()),
         }
     }
 

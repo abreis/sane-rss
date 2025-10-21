@@ -54,6 +54,8 @@ async fn main() {
             if let Err(error) = storage.load_seen_guids(cache_file).await {
                 error!("failed to load items: {}", error);
             }
+        } else {
+            info!("Not loading seen items, no cache file given in config");
         }
 
         Arc::new(storage)
