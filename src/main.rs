@@ -1,6 +1,9 @@
+use futures::StreamExt;
 use sane_rss::{
     config::Config, llm::LlmFilter, poller::FeedPoller, server::create_router, storage::FeedStorage,
 };
+use signal_hook::consts::signal::*;
+use signal_hook_tokio::Signals;
 use std::{env, sync::Arc};
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -90,6 +93,25 @@ async fn main() {
         }
     });
 
+    //
+    // Signal handling.
+    let mut signals = Signals::new(&[SIGTERM, SIGINT, SIGQUIT]).unwrap();
+    let signal_handle = signals.handle();
+
+    let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel::<()>();
+
+    let signals_task = tokio::spawn(async move {
+        while let Some(signal) = signals.next().await {
+            match signal {
+                SIGTERM | SIGINT | SIGQUIT => {
+                    shutdown_send.send(()).unwrap();
+                    break;
+                }
+                _ => unreachable!(),
+            }
+        }
+    });
+
     // Wait for tasks (they should run forever)
     tokio::select! {
         _ = poller_handle => {
@@ -98,7 +120,7 @@ async fn main() {
         _ = server_handle => {
             error!("HTTP server stopped unexpectedly");
         }
-        _ = tokio::signal::ctrl_c() => {
+        _ = shutdown_recv => {
             info!("Received shutdown signal, stopping...");
 
             if let Some(cache_file) = &config.guid_cache_file {
@@ -109,4 +131,7 @@ async fn main() {
             }
         }
     }
+
+    signal_handle.close();
+    signals_task.await.unwrap();
 }

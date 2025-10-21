@@ -13,6 +13,8 @@ rss = "2.0"
 scraper = "0.23"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+signal-hook = "0.3.18"
+signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
 tokio = { version = "1", features = ["full"] }
 toml = "0.9"
 tracing = "0.1"
