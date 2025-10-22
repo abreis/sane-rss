@@ -50,7 +50,7 @@ async fn main() {
 
         // Attempt to load previously seen feed items.
         if let Some(cache_file) = &config.guid_cache_file {
-            info!("Loading seen feed items from {:?}...", cache_file);
+            info!("Loading seen feed items from {:?}", cache_file);
             if let Err(error) = storage.load_seen_guids(cache_file).await {
                 error!("failed to load items: {}", error);
             }

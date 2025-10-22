@@ -3,7 +3,7 @@ use rss::Item;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, info, trace, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FilterResponse {
@@ -61,14 +61,38 @@ impl LlmFilter {
             return true;
         }
 
+        let accept_topics_joined = accept_topics.join("; ");
+        let reject_topics_joined = reject_topics.join("; ");
+
+        let description = if description.is_empty() {
+            "none"
+        } else {
+            &description
+        };
+        let content_excerpt = if content_excerpt.is_empty() {
+            "none"
+        } else {
+            &content_excerpt
+        };
+        let accept_topics = if accept_topics_joined.is_empty() {
+            "none"
+        } else {
+            &accept_topics_joined
+        };
+        let reject_topics = if reject_topics_joined.is_empty() {
+            "none"
+        } else {
+            &reject_topics_joined
+        };
+
         let prompt = self
             .config
             .prompt
             .replace("{title}", title)
             .replace("{description}", description)
-            .replace("{content_excerpt}", &content_excerpt)
-            .replace("{accept_topics}", &accept_topics.join("; "))
-            .replace("{reject_topics}", &reject_topics.join("; "));
+            .replace("{content_excerpt}", content_excerpt)
+            .replace("{accept_topics}", accept_topics)
+            .replace("{reject_topics}", reject_topics);
 
         match self.call_anthropic_api(&prompt).await {
             Ok(response) => {
@@ -94,12 +118,13 @@ impl LlmFilter {
     ) -> Result<FilterResponse, Box<dyn std::error::Error>> {
         let request_body = serde_json::json!({
             "model": self.config.model,
-            "max_tokens": 1024,
+            "max_tokens": 2048,
             "messages": [{
                 "role": "user",
                 "content": prompt
             }],
         });
+        trace!(request_body = request_body.to_string());
 
         let response = self
             .client
@@ -110,6 +135,7 @@ impl LlmFilter {
             .json(&request_body)
             .send()
             .await?;
+        trace!(?response);
 
         if !response.status().is_success() {
             let error_text = response.text().await?;
@@ -122,8 +148,27 @@ impl LlmFilter {
         let content = api_response["content"][0]["text"]
             .as_str()
             .ok_or("No text content in response")?;
+        trace!(response_content = content);
 
-        tracing::debug!(content);
+        // Strip markdown code fences if present
+        let content = content.trim();
+        let content = if content.starts_with("```json") && content.ends_with("```") {
+            content
+                .strip_prefix("```json")
+                .unwrap()
+                .strip_suffix("```")
+                .unwrap()
+                .trim()
+        } else if content.starts_with("```") && content.ends_with("```") {
+            content
+                .strip_prefix("```")
+                .unwrap()
+                .strip_suffix("```")
+                .unwrap()
+                .trim()
+        } else {
+            content
+        };
 
         let filter_response: FilterResponse = serde_json::from_str(content)?;
         Ok(filter_response)
