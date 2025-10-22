@@ -1,9 +1,13 @@
 use crate::config::{Filters, LlmConfig};
+use llm::{
+    LLMProvider,
+    builder::{LLMBackend, LLMBuilder},
+    chat::ChatMessage,
+};
 use rss::Item;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FilterResponse {
@@ -12,18 +16,23 @@ struct FilterResponse {
 }
 
 pub struct LlmFilter {
-    client: reqwest::Client,
+    llm: Box<dyn LLMProvider>,
     config: LlmConfig,
 }
 
 impl LlmFilter {
     pub fn new(config: LlmConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
+        let llm = LLMBuilder::new()
+            .backend(LLMBackend::OpenAI)
+            .api_key(&config.api_key)
+            .model(&config.model)
+            // .model("gpt-5-2025-08-07")
+            // .model("gpt-5-mini-2025-08-07")
+            // .model("gpt-5-nano-2025-08-07")
             .build()
-            .expect("Failed to create HTTP client");
+            .unwrap();
 
-        Self { client, config }
+        Self { llm, config }
     }
 
     pub async fn should_accept_item(
@@ -116,38 +125,11 @@ impl LlmFilter {
         &self,
         prompt: &str,
     ) -> Result<FilterResponse, Box<dyn std::error::Error>> {
-        let request_body = serde_json::json!({
-            "model": self.config.model,
-            "max_tokens": 2048,
-            "messages": [{
-                "role": "user",
-                "content": prompt
-            }],
-        });
-        trace!(request_body = request_body.to_string());
+        let mut messages = vec![];
+        messages.push(ChatMessage::user().content(prompt).build());
 
-        let response = self
-            .client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", &self.config.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .json(&request_body)
-            .send()
-            .await?;
-        trace!(?response);
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            warn!("Anthropic API error: {}", error_text);
-            return Err(format!("API request failed: {}", error_text).into());
-        }
-
-        let api_response: serde_json::Value = response.json().await?;
-
-        let content = api_response["content"][0]["text"]
-            .as_str()
-            .ok_or("No text content in response")?;
+        let response = self.llm.chat(&messages).await?;
+        let content = response.text().ok_or("No text content in response")?;
         trace!(response_content = content);
 
         // Strip markdown code fences if present
