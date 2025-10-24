@@ -131,6 +131,7 @@ impl FeedStorageInner {
     ///
     /// Overwrites the file's contents.
     pub fn save_known_items(&self) -> std::io::Result<()> {
+        tracing::debug!("Saving known items to file");
         let json = serde_json::to_string(&self.known_items)?;
         std::fs::write(&self.known_items_file, json)?;
         Ok(())
@@ -140,10 +141,13 @@ impl FeedStorageInner {
     pub fn load_known_items(&mut self) -> std::io::Result<()> {
         use std::io::ErrorKind;
 
+        tracing::debug!("Loading known items from file");
         match std::fs::read_to_string(&self.known_items_file) {
             // File was read, attempt to deserialize and store.
             Ok(content) => {
                 self.known_items = serde_json::from_str(&content)?;
+                tracing::info!("Loaded {} known items from file", self.known_items.len());
+
                 Ok(())
             }
 
