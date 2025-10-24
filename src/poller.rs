@@ -1,146 +1,116 @@
+//! Periodic feed poller.
+
+use anyhow::Context;
+
 use crate::{
-    config::Config,
-    feed::{FeedFetcher, item_to_guid},
-    llm::LlmFilter,
+    config::{Config, FeedConfig},
+    filter::LLMFilter,
     storage::FeedStorage,
 };
-use futures::stream::{self, StreamExt};
-use std::{sync::Arc, time::Duration};
-use tokio::time;
-use tracing::{debug, info};
+use std::time::Duration;
 
 pub struct FeedPoller {
-    config: Arc<Config>,
-    storage: Arc<FeedStorage>,
-    fetcher: FeedFetcher,
-    filter: Arc<LlmFilter>,
+    config: Config,
+    storage: FeedStorage,
+    filter: LLMFilter,
 }
 
 impl FeedPoller {
-    pub fn new(config: Arc<Config>, storage: Arc<FeedStorage>, filter: Arc<LlmFilter>) -> Self {
+    pub fn new(config: Config, storage: FeedStorage, filter: LLMFilter) -> Self {
         Self {
             config,
             storage,
-            fetcher: FeedFetcher::new(),
             filter,
         }
     }
 
-    pub async fn start(self) {
-        let interval_duration = Duration::from_secs(self.config.polling_interval_seconds());
-        let mut interval = time::interval(interval_duration);
-
-        info!(
+    // Launches the periodic feed poller.
+    pub async fn launch(self) {
+        let polling_interval = Duration::from_secs(self.config.polling_interval_seconds);
+        tracing::info!(
             "Starting feed poller with interval of {} seconds",
-            self.config.polling_interval_seconds()
+            polling_interval.as_secs()
         );
 
-        // The first tick completes immediately, skip it to avoid immediate polling.
-        interval.tick().await;
+        // An async periodic interval.
+        let mut interval = tokio::time::interval(polling_interval);
+        // The first tick completes immediately.
+        // To avoid immediate polling, uncomment to skip it.
+        // interval.tick().await;
 
         loop {
             interval.tick().await;
-            debug!("Starting feed polling cycle");
-            self.poll_all_feeds().await;
+
+            tracing::debug!("[feed_poller]: Polling all feeds");
+            self.poll_feeds().await;
         }
     }
 
-    async fn poll_all_feeds(&self) {
-        for (feed_name, feed_config) in &self.config.feeds {
-            if let Some(channel) = self.fetcher.fetch_feed(feed_name, feed_config).await {
-                let items = channel.into_items();
-                for item in items {
-                    let guid = item_to_guid(&item);
+    async fn poll_feeds(&self) {
+        // Go through every feed.
+        'feed_loop: for (feed_name, feed_config) in &self.config.feeds {
+            tracing::debug!("Retrieving feed {feed_name}");
 
-                    // Skip items we've seen before.
-                    if !self.storage.is_new_item(feed_name, &guid).await {
-                        return;
-                    }
-
-                    info!(
-                        "Found new item in feed {}: {}",
-                        feed_name,
-                        item.title().unwrap_or("No title")
-                    );
-
-                    let should_accept = self
-                        .filter
-                        .should_accept_item(
-                            &item,
-                            &self.config.global_filters,
-                            &feed_config.filters,
-                        )
-                        .await;
-
-                    if should_accept {
-                        self.storage
-                            .store_items(
-                                feed_name.clone(),
-                                vec![item],
-                                None,
-                                None,
-                                self.config.max_items_per_feed(),
-                            )
-                            .await;
-                        info!("Added filtered item to feed {}", feed_name);
-                    } else {
-                        info!("Item rejected by filter");
-                        // Mark rejected items as seen to avoid reprocessing
-                        self.storage.mark_item_as_seen(feed_name, guid).await;
-                    }
+            // Retrieve the feed. Don't stop if it fails.
+            let channel = match retrieve_feed(feed_config).await {
+                Ok(channel) => channel,
+                Err(error) => {
+                    tracing::warn!("Retrieval error: {error}");
+                    continue 'feed_loop;
                 }
+            };
+            tracing::debug!(
+                "Retrieved {} items from feed {feed_name}",
+                channel.items().len()
+            );
+
+            let mut storage = self.storage.write().await;
+
+            // See if our storage knows this channel.
+            storage.add_channel(feed_name, channel.title(), channel.description());
+
+            // Strip any items we've already seen from the list.
+            let mut items: Vec<rss::Item> = channel.items;
+            items.retain(|item| !storage.is_known(&feed_name, item));
+
+            // Record remaining items as seen.
+            tracing::debug!("Recording {} items retained as new", items.len());
+            for unknown_item in &items {
+                storage.record_as_known(feed_name, unknown_item);
+            }
+
+            // Don't hold the lock through the (slow) LLM calls.
+            drop(storage);
+
+            // Send each item to the LLM for filtering.
+            let mut accepted_items = Vec::new();
+            for item in items {
+                if self.filter.accepts(feed_name, &item).await {
+                    accepted_items.push(item);
+                }
+            }
+
+            // If accepted, place it in our storage.
+            tracing::debug!("Filters accepted {} items, storing", accepted_items.len());
+            let mut storage = self.storage.write().await;
+            for item in accepted_items {
+                storage.store_filtered_item(&feed_name, item);
             }
         }
     }
+}
 
-    pub async fn initial_fetch(&self) -> Result<(), String> {
-        info!("Performing initial feed retrieval");
+async fn retrieve_feed(config: &FeedConfig) -> anyhow::Result<rss::Channel> {
+    tracing::debug!("Retrieving feed from {}", config.url);
 
-        let feeds: Vec<_> = self.config.feeds.iter().collect();
-        let max_items = self.config.max_items_per_feed();
+    let response = reqwest::get(&config.url)
+        .await
+        .context("Failed to HTTP GET feed")?;
 
-        let fetch_tasks = feeds.into_iter().map(|(feed_name, feed_config)| {
-            let fetcher = &self.fetcher;
-            let storage = &self.storage;
+    let content = response.text().await.context("No text in response")?;
 
-            async move {
-                match fetcher.fetch_feed(feed_name, feed_config).await {
-                    Some(channel) => {
-                        let title = channel.title().to_string();
-                        let description = channel.description().to_string();
-                        let items = channel.into_items();
+    let channel =
+        rss::Channel::read_from(content.as_bytes()).context("Failed to parse RSS feed")?;
 
-                        storage
-                            .store_items(
-                                feed_name.clone(),
-                                items,
-                                Some(title),
-                                Some(description),
-                                max_items,
-                            )
-                            .await;
-
-                        // Fetch favicon during initial retrieval
-                        if let Some(favicon_data) = fetcher.fetch_favicon(&feed_config.url).await {
-                            storage.store_favicon(feed_name, favicon_data).await;
-                        }
-
-                        Ok(())
-                    }
-                    None => Err(format!("Failed to fetch feed: {}", feed_name)),
-                }
-            }
-        });
-
-        let results: Vec<Result<(), String>> = stream::iter(fetch_tasks)
-            .buffer_unordered(5)
-            .collect()
-            .await;
-
-        for result in results {
-            result?;
-        }
-
-        Ok(())
-    }
+    Ok(channel)
 }
