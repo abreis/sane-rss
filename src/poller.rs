@@ -97,6 +97,11 @@ impl FeedPoller {
                 storage.store_filtered_item(&feed_name, item);
             }
         }
+
+        // At the end of each cycle, write our known items to disk.
+        if let Err(error) = self.storage.write().await.save_known_items() {
+            tracing::warn!("Failed to write known items to file: {}", error);
+        }
     }
 }
 

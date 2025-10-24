@@ -46,7 +46,7 @@ impl LLMFilter {
     pub async fn accepts(&self, feed_name: &str, item: &rss::Item) -> bool {
         tracing::debug!(
             "Asking LLM if it accepts item from feed {feed_name}: {:?}",
-            item.title()
+            item.title().unwrap_or("<no title>")
         );
 
         //

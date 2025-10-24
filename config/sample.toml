@@ -9,7 +9,7 @@ server_port = 8080
 max_items_per_feed = 60
 
 # File name to keep seen items across restarts. Kept in config directory.
-guid_cache_file = "seen_items.json"
+known_items_file = "known_items.json"
 
 [llm]
 provider = "openai"

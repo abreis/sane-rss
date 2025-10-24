@@ -1,8 +1,15 @@
 use rss::Item;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+/// Don't keep more than this number of items in the known items cache.
+///
+/// Limit is per feed. It should be larger than the largest number of items
+/// returned by any feed (typically <60).
+const KNOWN_ITEMS_LIMIT: usize = 128;
 
 pub struct StoredFeed {
     pub title: String,
@@ -25,7 +32,10 @@ pub struct FeedStorageInner {
     /// A list of items we've seen before (and might have filtered out).
     ///
     /// Note: not limited by `max_items`.
-    pub known_items: HashMap<String, HashSet<String>>,
+    pub known_items: HashMap<String, VecDeque<String>>,
+
+    /// A location to store and load known items.
+    known_items_file: PathBuf,
 }
 
 impl Deref for FeedStorage {
@@ -36,12 +46,13 @@ impl Deref for FeedStorage {
 }
 
 impl FeedStorage {
-    pub fn new(max_items: usize) -> Self {
+    pub fn new(max_items: usize, known_items_file: PathBuf) -> Self {
         Self {
             inner: Arc::new(RwLock::new(FeedStorageInner {
                 feeds: HashMap::new(),
                 max_items,
                 known_items: HashMap::new(),
+                known_items_file,
             })),
         }
     }
@@ -91,12 +102,14 @@ impl FeedStorageInner {
     /// Records a new item in a feed as known.
     ///
     /// Returns false if the item already existed.
-    pub fn record_as_known(&mut self, feed_name: impl Into<String>, item: &rss::Item) -> bool {
+    pub fn record_as_known(&mut self, feed_name: impl Into<String>, item: &rss::Item) {
         let item_guid = Self::item_to_guid(item);
-        self.known_items
-            .entry(feed_name.into())
-            .or_default()
-            .insert(item_guid)
+        let item_guids = self.known_items.entry(feed_name.into()).or_default();
+
+        item_guids.push_back(item_guid);
+        while item_guids.len() > KNOWN_ITEMS_LIMIT {
+            item_guids.pop_front();
+        }
     }
 
     /// Turns an RSS item into a GUID.
@@ -113,145 +126,32 @@ impl FeedStorageInner {
             unreachable!()
         }
     }
+
+    /// Save our list of known items to a file.
+    ///
+    /// Overwrites the file's contents.
+    pub fn save_known_items(&self) -> std::io::Result<()> {
+        let json = serde_json::to_string(&self.known_items)?;
+        std::fs::write(&self.known_items_file, json)?;
+        Ok(())
+    }
+
+    /// Loads our list of known items from a file.
+    pub fn load_known_items(&mut self) -> std::io::Result<()> {
+        use std::io::ErrorKind;
+
+        match std::fs::read_to_string(&self.known_items_file) {
+            // File was read, attempt to deserialize and store.
+            Ok(content) => {
+                self.known_items = serde_json::from_str(&content)?;
+                Ok(())
+            }
+
+            // File did not exist: continue.
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+
+            // Other errors: fail.
+            Err(error) => Err(error),
+        }
+    }
 }
-
-// /// Initialize a feed with metadata during first fetch
-// pub async fn initialize_feed(
-//     &self,
-//     feed_name: String,
-//     feed_title: String,
-//     feed_description: String,
-// ) {
-//     use std::collections::hash_map::Entry;
-//     let mut feeds = self.feeds.write().await;
-
-//     info!("Initializing feed {}", feed_name);
-
-//     match feeds.entry(feed_name) {
-//         Entry::Occupied(mut entry) => {
-//             let feed = entry.get_mut();
-//             feed.title = Some(feed_title);
-//             feed.description = Some(feed_description);
-//         }
-//         Entry::Vacant(entry) => {
-//             entry.insert(Feed {
-//                 title: Some(feed_title),
-//                 description: Some(feed_description),
-//                 items: VecDeque::new(),
-//                 favicon: None,
-//             });
-//         }
-//     }
-// }
-
-// /// Add new items to an existing feed during polling
-// /// Only adds items that haven't been seen before (deduplication)
-// pub async fn add_items(&self, feed_name: String, items: Vec<Item>, max_items: usize) {
-//     // Filter out items we've already seen
-//     let mut new_items = Vec::new();
-//     for item in items {
-//         let guid = item_to_guid(&item);
-//         if self.is_new_item(&feed_name, &guid).await {
-//             new_items.push(item);
-//         }
-//     }
-
-//     if new_items.is_empty() {
-//         return;
-//     }
-
-//     let mut feeds = self.feeds.write().await;
-
-//     info!("Adding {} new items to feed {}", new_items.len(), feed_name);
-
-//     if let Some(feed) = feeds.get_mut(&feed_name) {
-//         for item in &new_items {
-//             feed.items.push_back(item.clone());
-
-//             // Remove oldest items if we exceed the limit
-//             while feed.items.len() > max_items {
-//                 feed.items.pop_front();
-//             }
-//         }
-//     } else {
-//         // Feed doesn't exist yet, this can't happen.
-//         warn!("Tried to add items to a feed that doesn't exist: {feed_name}")
-//     }
-
-//     // Drop the write lock before calling record_seen_item
-//     drop(feeds);
-
-//     // Mark all new items as seen using the dedicated method
-//     for item in &new_items {
-//         self.record_seen_item(&feed_name, item_to_guid(item)).await;
-//     }
-// }
-
-// pub async fn is_new_item(&self, feed_name: &str, guid: &str) -> bool {
-//     let seen = self.seen_guids.read().await;
-//     if let Some(feed_guids) = seen.get(feed_name) {
-//         !feed_guids.contains(guid)
-//     } else {
-//         true
-//     }
-// }
-
-// // Tracks items we've already retrieved, so we don't add them repeatedly.
-// pub async fn record_seen_item(&self, feed_name: &str, guid: String) {
-//     use std::collections::hash_map::Entry;
-
-//     let mut seen = self.seen_guids.write().await;
-
-//     match seen.entry(feed_name.to_string()) {
-//         Entry::Occupied(mut entry) => {
-//             entry.get_mut().insert(guid);
-//         }
-//         Entry::Vacant(entry) => {
-//             let mut guids = HashSet::new();
-//             guids.insert(guid);
-//             entry.insert(guids);
-//         }
-//     }
-// }
-
-// pub async fn store_favicon(&self, feed_name: &str, favicon_data: Vec<u8>) {
-//     let mut feeds = self.feeds.write().await;
-//     if let Some(feed) = feeds.get_mut(feed_name) {
-//         feed.favicon = Some(favicon_data);
-//         info!("Stored favicon for feed {}", feed_name);
-//     }
-// }
-
-// pub async fn get_favicon(&self, feed_name: &str) -> Option<Vec<u8>> {
-//     let feeds = self.feeds.read().await;
-//     feeds.get(feed_name).and_then(|feed| feed.favicon.clone())
-// }
-
-// pub async fn save_seen_guids(&self, path: &PathBuf) -> std::io::Result<()> {
-//     let seen = self.seen_guids.read().await;
-//     let json = serde_json::to_string(&*seen)?;
-//     std::fs::write(path, json)?;
-//     Ok(())
-// }
-
-// pub async fn load_seen_guids(&self, path: &PathBuf) -> std::io::Result<()> {
-//     use std::io::ErrorKind;
-
-//     let json = match std::fs::read_to_string(path) {
-//         Ok(content) => {
-//             if content.is_empty() {
-//                 return Ok(());
-//             }
-//             content
-//         }
-//         Err(e) if e.kind() == ErrorKind::NotFound => {
-//             return Ok(());
-//         }
-//         Err(e) => return Err(e),
-//     };
-
-//     let loaded: HashMap<String, HashSet<String>> = serde_json::from_str(&json)?;
-//     let mut seen = self.seen_guids.write().await;
-//     *seen = loaded;
-//     Ok(())
-// }

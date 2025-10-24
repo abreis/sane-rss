@@ -10,7 +10,7 @@ pub struct Config {
     pub server_port: u16,
     pub polling_interval_seconds: u64,
     pub max_items_per_feed: usize,
-    pub guid_cache_file: PathBuf,
+    pub known_items_file: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

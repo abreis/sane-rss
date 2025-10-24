@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
 
     //
     // Load configuration.
-    let config: config::Config = {
+    let config = {
         // Get the config file from the first commandline argument.
         let config_path = std::env::args()
             .nth(1)
@@ -38,16 +38,28 @@ async fn main() -> anyhow::Result<()> {
             std::fs::canonicalize(&config_path).context("Failed to resolve config path")?;
 
         // Read file and deserialize.
-        let content = std::fs::read_to_string(config_path).context("Failed to read config file")?;
-        toml::from_str(&content).context("Failed to deserialize config file")?
+        let content =
+            std::fs::read_to_string(&config_path).context("Failed to read config file")?;
+        let mut config: config::Config =
+            toml::from_str(&content).context("Failed to deserialize config file")?;
+
+        // Place known_items_file in the same directory as the config file.
+        let mut known_items_file = config_path;
+        known_items_file.set_file_name(&config.known_items_file);
+        config.known_items_file = known_items_file;
+
+        config
     };
     tracing::info!("Configuration loaded successfully");
 
     //
     // Initialize components.
-    let storage = FeedStorage::new(config.max_items_per_feed);
+    let storage = FeedStorage::new(config.max_items_per_feed, config.known_items_file.clone());
     let llm_filter = LLMFilter::new(config.clone())?;
     let poller = FeedPoller::new(config.clone(), storage.clone(), llm_filter);
+
+    // Load known items from disk.
+    storage.write().await.load_known_items()?;
 
     //
     // Spawn our polling task.
@@ -90,6 +102,9 @@ async fn main() -> anyhow::Result<()> {
         _ = server_handle => tracing::error!("HTTP server stopped unexpectedly, shutting down"),
         _ = poller_handle => tracing::error!("Feed poller stopped unexpectedly, shutting down"),
     }
+
+    // Store our list of known items on exit.
+    storage.read().await.save_known_items()?;
 
     Ok(())
 }
